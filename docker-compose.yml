@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: events_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-events}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-events_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-events}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs only on the FIRST start (empty data volume)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+volumes:
+  pgdata:

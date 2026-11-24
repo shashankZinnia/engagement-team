@@ -1,0 +1,194 @@
+### Events platform: REST Client file (VS Code extension "REST Client")
+### Run the requests top to bottom. Requests marked "# @name x" save their response for later ones.
+### Before starting: docker compose up -d ; npm run seed ; npm run dev
+### Paste the ids printed by `npm run seed` below.
+
+@host = http://localhost:3000
+@admin = PASTE_ADMIN_ID
+@alice = PASTE_ALICE_ID
+@bob = PASTE_BOB_ID
+@carol = PASTE_CAROL_ID
+@dave = PASTE_DAVE_ID
+
+### 1. Health -> {"status":"ok","db":"ok"}
+GET {{host}}/health
+
+### 2a. Create partner (admin)
+# @name partner
+POST {{host}}/partners
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{ "type": "cafe", "name": "Walkthrough Cafe", "city": "Mumbai", "capacity": 40 }
+
+### 2b. List partners (filters)
+GET {{host}}/partners?type=cafe&city=Mumbai
+
+### 2c. Create event (draft). waitlist_fee is charged by the mock payment.
+# @name event
+POST {{host}}/events
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{
+  "partner_id": "{{partner.response.body.id}}",
+  "title": "Walkthrough Night",
+  "description": "Created from requests.http",
+  "starts_at": "2030-01-15T18:00:00+05:30",
+  "capacity": 1,
+  "waitlist_fee": 500,
+  "needs_host": true
+}
+
+### 2d. Publish it
+PATCH {{host}}/events/{{event.response.body.id}}/publish
+x-user-id: {{admin}}
+
+### 2e. List events -> partner_name / partner_city joined in, stats included
+GET {{host}}/events
+
+### 3a. User A (alice) joins the waitlist -> 201 with payment
+# @name waitA
+POST {{host}}/events/{{event.response.body.id}}/waitlist
+x-user-id: {{alice}}
+
+### 3b. User B (bob) joins the waitlist -> 201
+# @name waitB
+POST {{host}}/events/{{event.response.body.id}}/waitlist
+x-user-id: {{bob}}
+
+### 3c. A again -> 409
+POST {{host}}/events/{{event.response.body.id}}/waitlist
+x-user-id: {{alice}}
+
+### 4a. Admin reviews the waitlist (profile + payment joined)
+GET {{host}}/admin/events/{{event.response.body.id}}/waitlist?status=pending
+x-user-id: {{admin}}
+
+### 4b. Approve A -> 200 (capacity is 1)
+PATCH {{host}}/admin/waitlist/{{waitA.response.body.id}}
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{ "status": "approved", "note": "Looks great" }
+
+### 4c. Approve B -> 409 (event full)
+PATCH {{host}}/admin/waitlist/{{waitB.response.body.id}}
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{ "status": "approved" }
+
+### 4d. Reject B -> 200
+PATCH {{host}}/admin/waitlist/{{waitB.response.body.id}}
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{ "status": "rejected", "note": "Profile incomplete" }
+
+### 5a. C (carol) applies to host
+# @name hostC
+POST {{host}}/events/{{event.response.body.id}}/host-applications
+Content-Type: application/json
+x-user-id: {{carol}}
+
+{ "pitch": "I run a board-game club" }
+
+### 5b. D (dave) applies to host
+POST {{host}}/events/{{event.response.body.id}}/host-applications
+Content-Type: application/json
+x-user-id: {{dave}}
+
+{ "pitch": "I love hosting dinners" }
+
+### 5c. Events needing a host -> host_applicant_count = 2
+GET {{host}}/hosts/events
+
+### 5d. Admin sees applicants with profiles
+GET {{host}}/admin/events/{{event.response.body.id}}/host-applications
+x-user-id: {{admin}}
+
+### 5e. Approve C
+PATCH {{host}}/admin/host-applications/{{hostC.response.body.id}}
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{ "status": "approved" }
+
+### 5f. Event detail -> C listed under hosts
+GET {{host}}/events/{{event.response.body.id}}
+
+### 6a. A swipes right (interested)
+PUT {{host}}/events/{{event.response.body.id}}/swipe
+Content-Type: application/json
+x-user-id: {{alice}}
+
+{ "direction": "right" }
+
+### 6b. B swipes left (skip)
+PUT {{host}}/events/{{event.response.body.id}}/swipe
+Content-Type: application/json
+x-user-id: {{bob}}
+
+{ "direction": "left" }
+
+### 6c. Top events -> interest_count +1 (from A only)
+GET {{host}}/events/top?limit=10
+
+### 6d. Feed for A -> event gone
+GET {{host}}/events/feed
+x-user-id: {{alice}}
+
+### 6e. Feed for B -> event gone
+GET {{host}}/events/feed
+x-user-id: {{bob}}
+
+### 6f. Refresh rank scores, then re-check top ordering
+POST {{host}}/admin/jobs/refresh-rank
+x-user-id: {{admin}}
+
+###
+GET {{host}}/events/top
+
+### 7a. Upload an image (put a real jpg/png at ./sample.jpg first). First image becomes the cover.
+# @name upload
+POST {{host}}/events/{{event.response.body.id}}/media
+x-user-id: {{admin}}
+Content-Type: multipart/form-data; boundary=XBOUNDARY
+
+--XBOUNDARY
+Content-Disposition: form-data; name="alt_text"
+
+Cover photo
+--XBOUNDARY
+Content-Disposition: form-data; name="file"; filename="sample.jpg"
+Content-Type: image/jpeg
+
+< ./sample.jpg
+--XBOUNDARY--
+
+### 7b. Open this URL in the browser to see the image (Ctrl+click it)
+GET {{host}}/media/{{upload.response.body.media_id}}
+
+### 7c. Events list returns cover_media_id only, no bytes
+GET {{host}}/events
+
+### 8a. Create a product with variants (admin)
+POST {{host}}/products
+Content-Type: application/json
+x-user-id: {{admin}}
+
+{
+  "name": "Walkthrough Hoodie",
+  "description": "Warm",
+  "variants": [
+    { "sku": "WALK-HOOD-M", "size": "M", "color": "grey", "price": 1999, "stock": 10 },
+    { "sku": "WALK-HOOD-L", "size": "L", "color": "grey", "price": 1999, "stock": 5 }
+  ]
+}
+
+### 8b. Products with variants nested
+GET {{host}}/products
+
+### 9. Audit log: no endpoint (not in the brief). Run this in PowerShell instead:
+###   docker exec events_db psql -U events -d events -c "SELECT id, action, entity_type, actor_id, metadata, created_at FROM audit_log ORDER BY id"
